@@ -1,4 +1,4 @@
-# app.py
+
 import torch
 import torch.nn as nn
 from torchvision.models import resnet50, ResNet50_Weights
@@ -11,18 +11,13 @@ from flask import Flask, render_template, Response, jsonify
 import threading
 import time
 import io
-
-# --- 1. Model Definition (MUST BE IDENTICAL TO TRAINING) ---
 class ResNet50Arc(nn.Module):
     def __init__(self, num_classes, embedding_size=512):
         super(ResNet50Arc, self).__init__()
-        # Ensure weights are consistent with training. If trained from scratch, use weights=None.
-        # Otherwise, use the exact weights version like ResNet50_Weights.IMAGENET1K_V1
-        # If your model was trained from scratch without ImageNet weights, change this to `weights=None`
         self.backbone = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
-        self.backbone.fc = nn.Identity() # Remove the default classification head
+        self.backbone.fc = nn.Identity() 
 
-        self.embedding = nn.Linear(2048, embedding_size) # ResNet50's final output before FC is 2048
+        self.embedding = nn.Linear(2048, embedding_size) 
         self.bn = nn.BatchNorm1d(embedding_size)
         self.classifier = nn.Linear(embedding_size, num_classes)
 
@@ -33,39 +28,31 @@ class ResNet50Arc(nn.Module):
         x = self.classifier(x)
         return x
 
-# --- 2. Configuration ---
+
 app = Flask(__name__)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL_PATH = r"C:\Users\donjo\Desktop\Projects\MirrorAi\model\ResNet50Arc_2025-07-19_20-41-51_final_model.pt"
-
-# IMPORTANT: Define your emotion class names here.
-# The order MUST EXACTLY match the class indices that your model outputs.
-# Common mapping for 7 emotions (e.g., from FER-2013 dataset):
 CLASS_NAMES = ["Angry", "Disgust", "Fear", "Happy", "Sad", "Surprise", "Neutral"]
-# If your model's classes are different (e.g., only 3 emotions or a different order),
-# modify this list accordingly.
 
-# Define the image transformations (MUST MATCH TRAINING!)
-# Common transformations for ImageNet-pretrained models:
 image_transforms = transforms.Compose([
-    transforms.Resize(256),            # Resize to 256
-    transforms.CenterCrop(224),        # Crop the center 224x224
-    transforms.ToTensor(),             # Convert PIL Image to PyTorch Tensor
-    transforms.Normalize(              # Normalize with ImageNet means and stds
+    transforms.Resize(256),            
+    transforms.CenterCrop(224),       
+    transforms.ToTensor(),             
+    transforms.Normalize(              
         mean=[0.485, 0.456, 0.406],
         std=[0.229, 0.224, 0.225]
     )
 ])
 
-# --- 3. Global Variables for Camera and Model ---
+
 camera = None
 model = None
 model_loaded_successfully = False
 num_classes_from_model = None
-latest_frame = None # To store the latest frame for processing
-frame_lock = threading.Lock() # To protect latest_frame access
+latest_frame = None 
+frame_lock = threading.Lock() 
 
-# --- 4. Model Loading Function ---
+
 def load_and_prepare_model(model_path, device):
     global model, model_loaded_successfully, num_classes_from_model
     print(f"\n--- Attempting to load model from: {model_path} ---")
@@ -74,16 +61,16 @@ def load_and_prepare_model(model_path, device):
         print("Successfully loaded the full file content.")
 
         if isinstance(loaded_full_dict, dict):
-            # Attempt to get num_classes from the loaded dictionary if it was saved
+            
             if 'num_classes' in loaded_full_dict:
                 actual_num_classes = loaded_full_dict['num_classes']
                 print(f"Detected num_classes from loaded file: {actual_num_classes}")
             else:
-                # Fallback: Use the length of CLASS_NAMES as the num_classes
+                
                 actual_num_classes = len(CLASS_NAMES)
                 print(f"Warning: 'num_classes' not found directly in checkpoint. Assuming {actual_num_classes} based on CLASS_NAMES length.")
             
-            # This part handles extracting the state_dict from various possible structures
+            
             state_dict_to_load = None
             if "model_state_dict" in loaded_full_dict:
                 nested_state_dict = loaded_full_dict['model_state_dict']
@@ -98,7 +85,7 @@ def load_and_prepare_model(model_path, device):
             elif "online_model" in loaded_full_dict:
                 state_dict_to_load = loaded_full_dict['online_model']
                 print("Extracted 'online_model' as the state_dict for loading.")
-                # Filter out 'initted' and 'step' if they somehow got into 'online_model' directly
+                
                 state_dict_to_load = {k: v for k, v in state_dict_to_load.items() if k not in ["initted", "step"]}
             else:
                 print("Loaded file is a dictionary, but neither 'model_state_dict' nor 'online_model' keys found.")
@@ -107,9 +94,7 @@ def load_and_prepare_model(model_path, device):
         else:
             print("The loaded file appears to be the state_dict directly (not a dictionary).")
             state_dict_to_load = loaded_full_dict
-            # If it's a direct state_dict, we might not have 'num_classes' easily.
-            # Assume num_classes is derived from the final layer of the model.
-            # For this scenario, it's safer to have CLASS_NAMES manually confirmed.
+           
             actual_num_classes = len(CLASS_NAMES)
 
 
@@ -121,16 +106,16 @@ def load_and_prepare_model(model_path, device):
         model = ResNet50Arc(num_classes=actual_num_classes).to(device)
         print("\n--- Attempting to load state_dict into model with strict=True ---")
         model.load_state_dict(state_dict_to_load, strict=True)
-        model.eval() # Set the model to evaluation mode
+        model.eval() 
         print("Model loaded successfully with strict=True and set to eval mode!")
         model_loaded_successfully = True
-        num_classes_from_model = actual_num_classes # Update global with confirmed value
+        num_classes_from_model = actual_num_classes 
         
-        # Verify that CLASS_NAMES length matches the loaded model's output size
+        
         if num_classes_from_model != len(CLASS_NAMES):
             print(f"ERROR: Model expects {num_classes_from_model} classes, but CLASS_NAMES has {len(CLASS_NAMES)} entries.")
             print("Please ensure your CLASS_NAMES list in app.py exactly matches the number of output classes of your trained model.")
-            model_loaded_successfully = False # Mark as failed if mismatch
+            model_loaded_successfully = False 
 
     except FileNotFoundError:
         print(f"Error: Model file not found at {model_path}. Please check the path.")
@@ -139,17 +124,13 @@ def load_and_prepare_model(model_path, device):
         print(f"An unexpected error occurred during model loading: {e}")
         model_loaded_successfully = False
 
-# --- 5. Camera Capture Thread Function ---
 def capture_frames():
     global camera, latest_frame
-    camera = cv2.VideoCapture(0) # 0 for default webcam, adjust if needed
+    camera = cv2.VideoCapture(0) 
     if not camera.isOpened():
         print("Error: Could not open camera. Please check if camera is connected and not in use.")
         return
 
-    # Set camera resolution (optional, might need to be supported by webcam)
-    # camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    # camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     while True:
         ret, frame = camera.read()
@@ -158,22 +139,22 @@ def capture_frames():
             break
         
         with frame_lock:
-            latest_frame = frame.copy() # Store a copy for processing
+            latest_frame = frame.copy() 
 
-        # Encode frame as JPEG for streaming to web client
+
         ret, buffer = cv2.imencode('.jpg', frame)
         frame_bytes = buffer.tobytes()
         
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         
-        # Small delay to prevent overwhelming the CPU and network
-        time.sleep(0.03) # ~30 frames per second
+
+        time.sleep(0.03) 
 
     camera.release()
     print("Camera released.")
 
-# --- 6. Flask Routes ---
+
 
 @app.route('/')
 def index():
@@ -197,25 +178,24 @@ def predict_from_camera():
         return jsonify({"error": "No frame available from camera. Please ensure camera is running."}), 500
 
     with frame_lock:
-        frame_to_process = latest_frame.copy() # Get the most recent frame for prediction
+        frame_to_process = latest_frame.copy() 
 
     try:
-        # Convert OpenCV BGR image (numpy array) to PIL RGB image
+
         pil_image = Image.fromarray(cv2.cvtColor(frame_to_process, cv2.COLOR_BGR2RGB))
         
-        # Preprocess the image using the defined transformations
-        input_tensor = image_transforms(pil_image).to(device)
-        input_batch = input_tensor.unsqueeze(0) # Add a batch dimension (B, C, H, W)
 
-        with torch.no_grad(): # Disable gradient calculation for inference
+        input_tensor = image_transforms(pil_image).to(device)
+        input_batch = input_tensor.unsqueeze(0)
+
+        with torch.no_grad(): 
             output = model(input_batch)
 
-        # Apply softmax to get probabilities and find the most likely class
+ 
         probabilities = torch.softmax(output, dim=1)
         predicted_class_idx = torch.argmax(probabilities, dim=1).item()
-        confidence = probabilities[0, predicted_class_idx].item() # Confidence of the predicted class
+        confidence = probabilities[0, predicted_class_idx].item() 
 
-        # Get the emotion name using the CLASS_NAMES list
         if 0 <= predicted_class_idx < len(CLASS_NAMES):
             predicted_class_name = CLASS_NAMES[predicted_class_idx]
         else:
@@ -226,31 +206,26 @@ def predict_from_camera():
             "success": True,
             "predicted_class_index": predicted_class_idx,
             "predicted_class_name": predicted_class_name,
-            "confidence": f"{confidence:.4f}" # Format confidence to 4 decimal places
+            "confidence": f"{confidence:.4f}" 
         })
 
     except Exception as e:
-        # Log the full error for debugging
+ 
         print(f"Error during prediction: {e}")
         return jsonify({"error": f"An unexpected error occurred during prediction: {str(e)}"}), 500
 
-# --- 7. Run the Flask App ---
 if __name__ == '__main__':
-    # Load the model only once when the application starts
+   
     load_and_prepare_model(MODEL_PATH, device)
 
     if not model_loaded_successfully:
         print("Model failed to load. The application will not be able to perform predictions.")
-        # You might choose to exit here or run Flask without prediction capability
-        # exit() 
+        
 
-    # Start the Flask app
-    # Use 0.0.0.0 to make it accessible from other devices on your network
-    # Set debug=False for production, debug=True for development (auto-reloads, better error messages)
-    # threaded=True is important for handling video feed and prediction requests concurrently
+   
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
     
-    # Clean up: Release camera when Flask app stops (important for resource management)
+
     if camera:
         camera.release()
         cv2.destroyAllWindows()
